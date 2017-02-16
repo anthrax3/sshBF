@@ -146,14 +146,17 @@ if __name__ == "__main__":
     parser.add_argument('-t', '--time', help='Set the time between requests (in seconds)')
 
     ip_addr = None
-    filename = None
+    user_filename = None
+    pass_filename = None
     req_time = 0.0
     args = parser.parse_args()
 
     if args.ip:
         ip_addr = args.ip
     if args.userlist:
-        filename = args.userlist
+        user_filename = args.userlist
+    if args.passlist:
+        pass_filename = args.passlist
     if args.time:
         req_time = float(args.time)
-    main(ip_addr, filename, req_time)
+    main(ip_addr, user_filename, req_time, pass_filename)
