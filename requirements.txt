@@ -1,0 +1,10 @@
+cffi
+cryptography
+enum34
+idna
+ipaddress
+paramiko
+pip
+pycparser
+setuptools
+six
