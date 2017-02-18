@@ -76,6 +76,7 @@ class Engine(object):
     def execute(self):
 
         self.start_time = time.time()
+        self.interval_start = time.time()
 
         ssh = self.init_ssh()
         successful = False
@@ -104,6 +105,7 @@ class Engine(object):
                             count_per_min = 1000.00/(int_time/60)
                             params = (user, pw, count, search_space, time.time()-self.start_time, count_per_min)
                             print('Failed: %s:%s. Attempted %s of %s. Elapsed Time: %s s (%s per min)' % params)
+                            self.interval_start = time.time()
                         elif self.verbose:
                             print('Failed: %s:%s' % (user, pw))
                         successful = True
